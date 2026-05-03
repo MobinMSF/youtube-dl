@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="https://raw.githubusercontent.com/nikzad-avasam/youtube-dl/refs/heads/main/video-icon.gif" width="400" alt="wide-2" />
+</div>
+
 # 🪄 دانلود کننده ی ویدیوهای یوتیوب
 با این پروژه ی جادویی شما میتوانید هر نوع ویدیو یوتیوب را به ریپازیتوری خود بصورت دائمی انتقال دهید و هر وقت نیاز داشتید آنرا دانلود کنید.
 
@@ -41,6 +45,9 @@
 - کانال پیام رسان بله برای آموزش های بیشتر 
 
 🔗 https://ble.ir/avasam_edu
+
+
+
 
 
 
