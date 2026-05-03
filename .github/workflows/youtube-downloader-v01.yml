@@ -8,16 +8,10 @@ on:
         required: true
         type: string
       quality:
-        description: 'Video quality'
+        description: 'Video quality (best, 1080, 720, 480, audio)'
         required: false
         default: 'best'
-        type: choice
-        options:
-          - 'best'
-          - '1080'
-          - '720'
-          - '480'
-          - 'audio'
+        type: string
       split_threshold_mb:
         description: 'Split files larger than this MB (0 = never split)'
         required: false
@@ -94,9 +88,7 @@ jobs:
           SPLIT_MB="${{ github.event.inputs.split_threshold_mb }}"
           SPLIT_BYTES=$(( SPLIT_MB * 1024 * 1024 ))
 
-          # Create a unique temporary folder for this run
-          TEMP_DIR="tmp_download_${{ github.run_id }}"
-          mkdir -p "$TEMP_DIR"
+          mkdir -p videos tmp_downloads
 
           echo "🏷️  AVASAM YouTube Downloader"
           echo "🌐 https://avasam.ir"
@@ -126,12 +118,12 @@ jobs:
               ;;
           esac
 
-          # Download through WARP SOCKS5 proxy into TEMP_DIR
+          # Download through WARP SOCKS5 proxy
           yt-dlp \
             --proxy "socks5://127.0.0.1:1080" \
             --format "$FORMAT" \
             --merge-output-format mp4 \
-            --output "$TEMP_DIR/%(title)s.%(ext)s" \
+            --output "tmp_downloads/%(title)s.%(ext)s" \
             --no-playlist \
             --retries 10 \
             --fragment-retries 10 \
@@ -141,11 +133,13 @@ jobs:
             --no-warnings \
             "$URL" || {
               echo "❌ yt-dlp failed, trying alternative method..."
+
+              # Try with different user agent
               yt-dlp \
                 --proxy "socks5://127.0.0.1:1080" \
                 --format "$FORMAT" \
                 --merge-output-format mp4 \
-                --output "$TEMP_DIR/%(title)s.%(ext)s" \
+                --output "tmp_downloads/%(title)s.%(ext)s" \
                 --no-playlist \
                 --retries 10 \
                 --fragment-retries 10 \
@@ -155,11 +149,10 @@ jobs:
             }
 
           echo "✅ Download complete!"
-          ls -la "$TEMP_DIR"
+          ls -la tmp_downloads/
 
-          # ---- Handle split & rename inside TEMP_DIR ----
-          FINAL_FILES=()
-          for FILE in "$TEMP_DIR"/*; do
+          # Handle file splitting
+          for FILE in tmp_downloads/*; do
             [ -f "$FILE" ] || continue
             SIZE=$(stat -c%s "$FILE")
             BASENAME=$(basename "$FILE")
@@ -168,38 +161,14 @@ jobs:
 
             if [ "$SPLIT_BYTES" -gt 0 ] && [ "$SIZE" -gt "$SPLIT_BYTES" ]; then
               echo "✂️ Splitting $BASENAME into ${SPLIT_MB}MB parts..."
-              # Create split zip directly inside TEMP_DIR (parts will appear as .zip, .z01, .z02...)
-              zip -0 -s "${SPLIT_MB}m" "$TEMP_DIR/${BASENAME}.zip" -j "$FILE"
-              rm "$FILE"   # remove original
-              # Rename all split parts (they start with the same basename)
-              for part in "$TEMP_DIR/${BASENAME}".zip "$TEMP_DIR/${BASENAME}".z*; do
-                [ -f "$part" ] || continue
-                part_base="${part%.*}"
-                part_ext="${part##*.}"
-                new_part="${part_base} - www.avasam.ir -.${part_ext}"
-                mv "$part" "$new_part"
-                FINAL_FILES+=("$new_part")
-              done
+              zip -0 -s "${SPLIT_MB}m" "videos/${BASENAME}.zip" -j "$FILE"
+              echo "✅ Created $(ls videos/${BASENAME}.z* 2>/dev/null | wc -l) parts"
             else
-              # No split: rename the file itself
-              name_without_ext="${BASENAME%.*}"
-              ext="${BASENAME##*.}"
-              newname="${name_without_ext} - www.avasam.ir -.${ext}"
-              mv "$FILE" "$TEMP_DIR/$newname"
-              FINAL_FILES+=("$TEMP_DIR/$newname")
+              cp "$FILE" "videos/$BASENAME"
+              echo "✅ Copied as-is (no split needed)"
             fi
           done
-
-          # Move all renamed files (and any split parts) into videos/ folder
-          mkdir -p videos
-          for f in "${FINAL_FILES[@]}"; do
-            mv "$f" videos/
-          done
-
-          # Clean up temp directory
-          rm -rf "$TEMP_DIR"
-
-          echo "✅ All new files have been renamed with suffix and moved to videos/"
+          rm -rf tmp_downloads
 
       - name: Stop WARP Container
         if: always()
@@ -221,7 +190,7 @@ jobs:
             exit 1
           fi
 
-          # Collect all new/modified files (only those just added? git will track changes)
+          # Collect all new/modified files
           mapfile -t ALL_FILES < <(find videos -type f -name "*")
 
           TOTAL=${#ALL_FILES[@]}
