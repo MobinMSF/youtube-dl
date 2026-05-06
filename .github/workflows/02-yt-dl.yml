@@ -1,7 +1,4 @@
-name: 02- 💾 Large Youtube Videos Downloader
-# OPTIMIZED VERSION - Supports 4K, faster downloads, reduced wait times
-# Changes: 8x concurrent fragments, 4K support, reduced WARP init time, faster retries
-# See FIXES_SUMMARY.md for detailed improvements
+name: 01- 💾 You tube Downloader
 
 on:
   workflow_dispatch:
