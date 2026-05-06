@@ -7,16 +7,24 @@ on:
   workflow_dispatch:
     inputs:
       youtube_url:
-        description: 'YouTube video URL'
+        description: '🔗 YouTube video URL'
         required: true
         type: string
       quality:
-        description: 'Video quality (best, 2160, 1440, 1080, 720, 480, audio)'
+        description: '🎬 Video quality'
         required: false
         default: 'best'
-        type: string
+        type: choice
+        options:
+          - best
+          - 2160
+          - 1440
+          - 1080
+          - 720
+          - 480
+          - audio
       password:
-        description: 'Password for zip files (optional)'
+        description: '🔒 Password for zip files (optional)'
         required: false
         default: ''
         type: string
@@ -146,41 +154,52 @@ jobs:
 
           # ============================================================
           # OPTIMIZED FORMAT STRINGS – support for 4K and high quality
+          # FIXED: Uses wildcards to accept ANY container (webm/vp9/mp4)
+          # FIXED: No bare "/best" fallback that ignores height
           # ============================================================
           case "$QUALITY" in
             "audio")
-              FORMAT="bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio"
+              FORMAT="bestaudio/bestaudio*"
               ;;
             "best")
-              # Request best quality available (including 4K, 8K)
-              FORMAT="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+              # Best video + best audio, any container (ffmpeg will remux to mp4)
+              FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best"
               ;;
             "2160"|"4k")
-              # 4K / 2160p
-              FORMAT="bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]"
+              # 4K / 2160p - exact height first, then wildcards for any container
+              FORMAT="bestvideo[height=2160]+bestaudio/bestvideo[height<=2160]+bestaudio/bestvideo[height=2160]*+bestaudio*/bestvideo[height<=2160]*+bestaudio*"
               ;;
             "1440"|"2k")
-              # 2K / 1440p
-              FORMAT="bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1440]+bestaudio/best[height<=1440]"
+              # 2K / 1440p - exact height first, then wildcards for any container
+              FORMAT="bestvideo[height=1440]+bestaudio/bestvideo[height<=1440]+bestaudio/bestvideo[height=1440]*+bestaudio*/bestvideo[height<=1440]*+bestaudio*"
               ;;
             "1080")
-              FORMAT="bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+              # 1080p - exact height first, then wildcards for any container
+              FORMAT="bestvideo[height=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/bestvideo[height=1080]*+bestaudio*/bestvideo[height<=1080]*+bestaudio*"
               ;;
             "720")
-              FORMAT="bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]"
+              # 720p - exact height first, then wildcards for any container
+              FORMAT="bestvideo[height=720]+bestaudio/bestvideo[height<=720]+bestaudio/bestvideo[height=720]*+bestaudio*/bestvideo[height<=720]*+bestaudio*"
               ;;
             "480")
-              FORMAT="bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]"
+              # 480p - exact height first, then wildcards for any container
+              FORMAT="bestvideo[height=480]+bestaudio/bestvideo[height<=480]+bestaudio/bestvideo[height=480]*+bestaudio*/bestvideo[height<=480]*+bestaudio*"
               ;;
             *)
-              FORMAT="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+              FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best"
               ;;
           esac
 
-          COMMON_FLAGS="--merge-output-format mp4 --output tmp_downloads/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+          # CRITICAL FIX: Added --format-sort to prioritize resolution over container format
+          if [ "$QUALITY" = "audio" ]; then
+            COMMON_FLAGS="--output tmp_downloads/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+          else
+            COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --output tmp_downloads/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+          fi
 
           # ============================================================
-          # FIXED METHOD ORDER – web client (with Deno) is now first
+          # FIXED METHOD ORDER – web client with proxy first (best quality)
+          # INSPIRED BY youtube-small.yml working solution
           # ============================================================
           download_video() {
             local METHOD=$1
@@ -188,8 +207,9 @@ jobs:
 
             case $METHOD in
               1)
-                # WEB CLIENT (with Deno) – highest quality, no proxy first to avoid extra latency
+                # Best method: web client + Deno + WARP proxy (highest quality)
                 yt-dlp \
+                  --proxy "socks5://127.0.0.1:1080" \
                   --format "$FORMAT" \
                   $COMMON_FLAGS \
                   --extractor-args "youtube:player_client=web" \
@@ -199,29 +219,25 @@ jobs:
                   "$URL"
                 ;;
               2)
-                # WEB CLIENT (with Deno) + WARP proxy fallback
+                # tv_embedded client - often has full quality, no n-challenge
                 yt-dlp \
                   --proxy "socks5://127.0.0.1:1080" \
                   --format "$FORMAT" \
                   $COMMON_FLAGS \
-                  --extractor-args "youtube:player_client=web" \
-                  --js-runtimes deno \
-                  --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
-                  --add-header "Accept-Language:en-US,en;q=0.9" \
+                  --extractor-args "youtube:player_client=tv_embedded" \
                   "$URL"
                 ;;
               3)
-                # Android client
+                # android_vr - high quality streams, no n-challenge required
                 yt-dlp \
                   --proxy "socks5://127.0.0.1:1080" \
                   --format "$FORMAT" \
                   $COMMON_FLAGS \
-                  --extractor-args "youtube:player_client=android" \
-                  --user-agent "Mozilla/5.0 (Linux; Android 12; SM-S906N Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36" \
+                  --extractor-args "youtube:player_client=android_vr" \
                   "$URL"
                 ;;
               4)
-                # mweb client
+                # mweb fallback - may cap quality but sometimes works
                 yt-dlp \
                   --proxy "socks5://127.0.0.1:1080" \
                   --format "$FORMAT" \
@@ -230,21 +246,22 @@ jobs:
                   "$URL"
                 ;;
               5)
-                # Combined mweb + android
+                # android fallback
                 yt-dlp \
                   --proxy "socks5://127.0.0.1:1080" \
                   --format "$FORMAT" \
                   $COMMON_FLAGS \
-                  --extractor-args "youtube:player_client=mweb,android" \
+                  --extractor-args "youtube:player_client=android" \
+                  --user-agent "Mozilla/5.0 (Linux; Android 12; SM-S906N Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36" \
                   "$URL"
                 ;;
               6)
-                # android_vr
+                # web client, no proxy - in case WARP is causing issues
                 yt-dlp \
-                  --proxy "socks5://127.0.0.1:1080" \
                   --format "$FORMAT" \
                   $COMMON_FLAGS \
-                  --extractor-args "youtube:player_client=android_vr" \
+                  --extractor-args "youtube:player_client=web" \
+                  --js-runtimes deno \
                   "$URL"
                 ;;
               7)
@@ -256,12 +273,13 @@ jobs:
                   "$URL"
                 ;;
               8)
-                # Ultimate fallback: bestvideo+bestaudio with multiple clients
+                # FIXED: Last resort now uses $FORMAT instead of hardcoded string
                 yt-dlp \
                   --proxy "socks5://127.0.0.1:1080" \
-                  --format "bestvideo+bestaudio/best" \
+                  --format "$FORMAT" \
                   $COMMON_FLAGS \
-                  --extractor-args "youtube:player_client=mweb,android,android_vr" \
+                  --extractor-args "youtube:player_client=web,mweb,android_vr" \
+                  --js-runtimes deno \
                   "$URL"
                 ;;
             esac
@@ -272,6 +290,26 @@ jobs:
             if download_video $METHOD; then
               DOWNLOAD_SUCCESS=true
               echo "Download successful with method $METHOD!"
+
+              # ───────────────────────────────────────────────────────────────
+              # ADDED: Verify the downloaded file actually meets requested quality
+              # If user asked for 1080/720/480 and we got something much lower,
+              # log a clear warning so it's visible in the workflow log
+              # ───────────────────────────────────────────────────────────────
+              if [ "$QUALITY" != "best" ] && [ "$QUALITY" != "audio" ]; then
+                for DOWNLOADED_FILE in tmp_downloads/*.mp4 tmp_downloads/*.webm tmp_downloads/*.mkv; do
+                  [ -f "$DOWNLOADED_FILE" ] || continue
+                  ACTUAL_HEIGHT=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$DOWNLOADED_FILE" 2>/dev/null || echo "unknown")
+                  echo "Requested quality: ${QUALITY}p | Actual video height: ${ACTUAL_HEIGHT}px"
+                  if [ "$ACTUAL_HEIGHT" != "unknown" ] && [ "$ACTUAL_HEIGHT" -lt $(( QUALITY - 50 )) ] 2>/dev/null; then
+                    echo "⚠️  WARNING: Downloaded resolution (${ACTUAL_HEIGHT}p) is significantly lower than requested (${QUALITY}p)."
+                    echo "   This may mean the video is not available at ${QUALITY}p on YouTube."
+                  else
+                    echo "✅ Quality check passed."
+                  fi
+                done
+              fi
+
               break
             else
               echo "Method $METHOD failed, waiting 3 seconds before next attempt..."
