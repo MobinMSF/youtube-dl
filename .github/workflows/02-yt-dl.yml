@@ -1,4 +1,3 @@
----
 name: 01- 💾 You tube Downloader
 
 on:
@@ -187,7 +186,7 @@ jobs:
             echo "Trying download method $METHOD..."
 
             if [ "$QUALITY" = "audio" ]; then
-              COMMON_FLAGS="--output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
+              COMMON_FLAGS="--extract-audio --audio-format mp3 --audio-quality 0 --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
             else
               COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --buffer-size 16K --http-chunk-size 10M --progress --newline"
             fi
@@ -827,7 +826,7 @@ jobs:
 
           while IFS= read -r -d '' FILE; do
             ALL_FILES+=("$FILE")
-          done < <(find videos -type f \( -name "*.zip" -o -name "*.z[0-9]*" -o -name "*.mp4" -o -name "*.mp3" -o -name "*.m4a" \) -print0 2>/dev/null | sort -z)
+          done < <(find videos -type f \( -name "*.zip" -o -name "*.z[0-9]*" -o -name "*.mp4" -o -name "*.mp3" -o -name "*.m4a" -o -name "*.webm" -o -name "*.opus" -o -name "*.ogg" -o -name "*.aac" -o -name "*.flac" \) -print0 2>/dev/null | sort -z)
 
           TOTAL_FILES=${#ALL_FILES[@]}
           echo "Found $TOTAL_FILES files to push"
